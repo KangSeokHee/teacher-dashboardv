@@ -1,155 +1,151 @@
-import sqlite3
 import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# 데이터베이스 연결
-conn = sqlite3.connect("students.db")
-c = conn.cursor()
+# 데이터 파일 경로 설정 (CSV 파일)
+STUDENT_DB_FILE = "student_db.csv"
+GRADE_DB_FILE = "grade_db.csv"
+ASSIGNMENT_DB_FILE = "assignment_db.csv"
+ATTENDANCE_DB_FILE = "attendance_db.csv"
+ATTENDANCE_CODE_FILE = "attendance_codes.csv"  # 출결 코드 관리 파일
 
-# 테이블 생성 코드: 만약 테이블이 없다면 생성
-def create_tables():
-    try:
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS students (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            grade TEXT
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS attendance (
-            student_id INTEGER,
-            date TEXT,
-            status TEXT
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS scores (
-            student_id INTEGER,
-            test_name TEXT,
-            score INTEGER
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS assignments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            due_date TEXT,
-            description TEXT
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS counseling (
-            student_id INTEGER,
-            date TEXT,
-            counselor TEXT,
-            type TEXT,
-            content TEXT
-        )
-        """)
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        st.error(f"테이블 생성 오류: {e}")
-        conn.rollback()
+# 기본 관리자 계정 설정
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_PASSWORD = "admin123"
 
-create_tables()  # 테이블 생성 함수 호출
+# 데이터 파일 불러오기
+def load_data():
+    if not pd.io.common.file_exists(STUDENT_DB_FILE):
+        student_df = pd.DataFrame(columns=["학생명", "전화번호", "이메일", "학부모 연락처", "학교명", "학년", "기존성적"])
+        student_df.to_csv(STUDENT_DB_FILE, index=False)
+    else:
+        student_df = pd.read_csv(STUDENT_DB_FILE)
+    
+    if not pd.io.common.file_exists(GRADE_DB_FILE):
+        grade_df = pd.DataFrame(columns=["이름", "시험명", "점수"])
+        grade_df.to_csv(GRADE_DB_FILE, index=False)
+    else:
+        grade_df = pd.read_csv(GRADE_DB_FILE)
+    
+    if not pd.io.common.file_exists(ASSIGNMENT_DB_FILE):
+        assignment_df = pd.DataFrame(columns=["과제명", "과제 내용", "학생 이름", "제출 여부", "피드백", "제출 일자", "과제 상태"])
+        assignment_df.to_csv(ASSIGNMENT_DB_FILE, index=False)
+    else:
+        assignment_df = pd.read_csv(ASSIGNMENT_DB_FILE)
+    
+    if not pd.io.common.file_exists(ATTENDANCE_DB_FILE):
+        attendance_df = pd.DataFrame(columns=["이름", "출석 여부", "날짜"])
+        attendance_df.to_csv(ATTENDANCE_DB_FILE, index=False)
+    else:
+        attendance_df = pd.read_csv(ATTENDANCE_DB_FILE)
+    
+    if not pd.io.common.file_exists(ATTENDANCE_CODE_FILE):
+        attendance_codes_df = pd.DataFrame(columns=["출결 코드", "생성 시간", "유효 시간"])
+        attendance_codes_df.to_csv(ATTENDANCE_CODE_FILE, index=False)
+    else:
+        attendance_codes_df = pd.read_csv(ATTENDANCE_CODE_FILE)
+    
+    return student_df, grade_df, assignment_df, attendance_df, attendance_codes_df
 
-# 메뉴 선택
-menu = st.sidebar.selectbox("📂 메뉴 선택", ["학생 관리", "출결 관리", "성적 등록", "과제 관리", "상담 기록"])
+# 학생 관리 섹터 1 - 학생 정보 표
+def student_management_info(student_df, grade_df, assignment_df, attendance_df):
+    st.title("학생 관리")
+    
+    # 섹터 1 - 학생 관리 표
+    student_summary = pd.merge(student_df, grade_df, on="학생명", how="left")
+    student_summary = pd.merge(student_summary, assignment_df[['학생 이름', '과제명', '제출 여부']], on='학생명', how='left')
+    student_summary = pd.merge(student_summary, attendance_df[['이름', '출석 여부']], on='학생명', how='left')
+    
+    st.markdown("<div style='background-color:#333333; padding:10px; color:white;'>학생 관리</div>", unsafe_allow_html=True)
+    st.dataframe(student_summary)
 
-# 학생 관리
-if menu == "학생 관리":
-    st.subheader("👩‍🏫 학생 목록")
-    try:
-        students = c.execute("SELECT id, name, grade FROM students").fetchall()
-        for sid, name, grade in students:
-            st.write(f"- {name} ({grade})")
-    except sqlite3.OperationalError as e:
-        st.error(f"학생 목록 조회 중 오류 발생: {e}")
+# 학생 관리 섹터 2 - 성적 히스토그램
+def grade_histogram(grade_df, student_df):
+    st.title("학생별 성적 히스토그램")
+    
+    # 섹터 2 - 학생별 성적 히스토그램
+    student_name = st.selectbox("성적을 볼 학생을 선택하세요", student_df["학생명"])
+    student_grades = grade_df[grade_df['이름'] == student_name]
+    
+    plt.figure(figsize=(10,6))
+    sns.histplot(student_grades['점수'], kde=True, color="blue")
+    plt.title(f"{student_name}의 성적 히스토그램")
+    st.pyplot(plt)
 
-    st.markdown("---")
-    st.subheader("➕ 학생 추가")
-    with st.form("add_student"):
-        name = st.text_input("이름")
-        grade = st.selectbox("학년", [f"초등학교 {i}학년" for i in range(1, 7)] + [f"중학교 {i}학년" for i in range(1, 4)] + [f"고등학교 {i}학년" for i in range(1, 4)])
-        submit = st.form_submit_button("등록")
-        if submit:
-            try:
-                c.execute("INSERT INTO students (name, grade) VALUES (?, ?)", (name, grade))
-                conn.commit()
-                st.success(f"{name} 학생이 등록되었습니다.")
-                st.rerun()  # 화면 리로딩
-            except sqlite3.OperationalError as e:
-                st.error(f"학생 추가 중 오류 발생: {e}")
+# 출결 관리 섹터 3 - 출결 현황
+def attendance_management(attendance_df, student_df):
+    st.title("출결 현황")
+    
+    # 섹터 3 - 학생별 출결 현황
+    student_name = st.selectbox("출결 현황을 볼 학생을 선택하세요", student_df["학생명"])
+    student_attendance = attendance_df[attendance_df['이름'] == student_name]
+    
+    # 출결 여부 그래프
+    plt.figure(figsize=(10,6))
+    sns.countplot(x='출석 여부', data=student_attendance, palette='Set2')
+    plt.title(f"{student_name}의 출결 현황")
+    st.pyplot(plt)
+    
+    st.markdown(f"**{student_name}**의 출결 현황:")
+    st.dataframe(student_attendance)
 
-# 출결 관리
-elif menu == "출결 관리":
-    st.subheader("📆 학생 출결 관리")
-    students = c.execute("SELECT id, name FROM students").fetchall()
-    try:
-        for sid, name in students:
-            with st.expander(f"{name} 출결 기록"):
-                date = st.date_input(f"출결 날짜 ({name})", key=f"date_{sid}")
-                status = st.radio(f"출결 상태", ["출석", "지각", "결석"], key=f"status_{sid}")
-                if st.button("저장", key=f"save_att_{sid}"):
-                    c.execute("INSERT INTO attendance (student_id, date, status) VALUES (?, ?, ?)", (sid, date.strftime('%Y-%m-%d'), status))
-                    conn.commit()
-                    st.success("저장 완료")
-    except sqlite3.OperationalError as e:
-        st.error(f"출결 기록 저장 중 오류 발생: {e}")
+# 과제 관리 섹터 4 - 과제 현황
+def assignment_management(assignment_df, student_df):
+    st.title("과제 관리")
+    
+    # 섹터 4 - 과제 관리 현황
+    student_name = st.selectbox("과제 현황을 볼 학생을 선택하세요", student_df["학생명"])
+    student_assignments = assignment_df[assignment_df['학생 이름'] == student_name]
+    
+    # 과제 제출 여부를 색상으로 구분 (미제출: 빨강, 제출완료: 초록)
+    student_assignments['과제 상태'] = student_assignments['과제 상태'].apply(lambda x: '미제출' if x == '미제출' else '제출완료')
+    
+    st.markdown("<div style='background-color:#333333; padding:10px; color:white;'>과제 현황</div>", unsafe_allow_html=True)
+    st.dataframe(student_assignments)
 
-# 성적 등록
-elif menu == "성적 등록":
-    st.subheader("📊 성적 입력")
-    students = c.execute("SELECT id, name FROM students").fetchall()
-    try:
-        for sid, name in students:
-            with st.expander(f"{name} 성적 입력"):
-                test = st.text_input(f"시험명", key=f"test_{sid}")
-                score = st.number_input("점수", 0, 100, key=f"score_{sid}")
-                if st.button("저장", key=f"save_score_{sid}"):
-                    c.execute("INSERT INTO scores (student_id, test_name, score) VALUES (?, ?, ?)", (sid, test, score))
-                    conn.commit()
-                    st.success("성적 저장됨")
-    except sqlite3.OperationalError as e:
-        st.error(f"성적 저장 중 오류 발생: {e}")
+# 학급 평균 성적 섹터 5 - 학급 평균 성적
+def class_average(grade_df, student_df):
+    st.title("학급 평균 성적")
+    
+    # 섹터 5 - 학급 평균 성적
+    class_avg = grade_df.groupby('이름')['점수'].mean().reset_index()
+    
+    plt.figure(figsize=(10,6))
+    sns.barplot(x='이름', y='점수', data=class_avg)
+    plt.title("학급 평균 성적")
+    st.pyplot(plt)
 
-# 과제 관리
-elif menu == "과제 관리":
-    st.subheader("📝 과제 등록")
-    with st.form("assignment_form"):
-        title = st.text_input("과제 제목")
-        due = st.date_input("마감일")
-        desc = st.text_area("과제 설명")
-        submit = st.form_submit_button("등록")
-        if submit:
-            try:
-                c.execute("INSERT INTO assignments (title, due_date, description) VALUES (?, ?, ?)", (title, due.strftime('%Y-%m-%d'), desc))
-                conn.commit()
-                st.success("과제가 등록되었습니다.")
-            except sqlite3.OperationalError as e:
-                st.error(f"과제 등록 중 오류 발생: {e}")
+# 출결률 계산 섹터 6 - 출결률 계산
+def attendance_rate(attendance_df, student_df):
+    st.title("출결률 계산")
+    
+    # 섹터 6 - 출결률 계산
+    attendance_rate = attendance_df.groupby('이름')['출석 여부'].apply(lambda x: (x == '출석').sum() / len(x) * 100).reset_index()
+    attendance_rate = attendance_rate.rename(columns={'출석 여부': '출석률'})
+    
+    st.markdown("<div style='background-color:#333333; padding:10px; color:white;'>출결률</div>", unsafe_allow_htsml=True)
+    st.dataframe(attendance_rate)
 
-    st.subheader("📋 과제 목록")
-    try:
-        for aid, title, due, desc in c.execute("SELECT * FROM assignments").fetchall():
-            st.markdown(f"### {title} (마감: {due})\n{desc}")
-    except sqlite3.OperationalError as e:
-        st.error(f"과제 목록 조회 중 오류 발생: {e}")
+# 메인 페이지
+def main():
+    student_df, grade_df, assignment_df, attendance_df, attendance_codes_df = load_data()
+    
+    menu = ["학생 관리", "성적 히스토그램", "출결 관리", "과제 관리", "학급 평균 성적", "출결률 계산"]
+    choice = st.sidebar.radio("메뉴", menu)
+    
+    if choice == "학생 관리":
+        student_management_info(student_df, grade_df, assignment_df, attendance_df)
+    elif choice == "성적 히스토그램":
+        grade_histogram(grade_df, student_df)
+    elif choice == "출결 관리":
+        attendance_management(attendance_df, student_df)
+    elif choice == "과제 관리":
+        assignment_management(assignment_df, student_df)
+    elif choice == "학급 평균 성적":
+        class_average(grade_df, student_df)
+    elif choice == "출결률 계산":
+        attendance_rate(attendance_df, student_df)
 
-# 상담 기록
-elif menu == "상담 기록":
-    st.subheader("🗂 상담 내용 입력")
-    students = c.execute("SELECT id, name FROM students").fetchall()
-    try:
-        for sid, name in students:
-            with st.expander(f"{name} 상담 작성"):
-                date = st.date_input("상담일")
-                counselor = st.text_input("상담자명", key=f"counselor_{sid}")
-                kind = st.selectbox("상담 종류", ["생활", "학습", "기타"], key=f"type_{sid}")
-                content = st.text_area("상담 내용", key=f"content_{sid}")
-                if st.button("기록", key=f"log_{sid}"):
-                    c.execute("INSERT INTO counseling (student_id, date, counselor, type, content) VALUES (?, ?, ?, ?, ?)", (sid, date.strftime('%Y-%m-%d'), counselor, kind, content))
-                    conn.commit()
-                    st.success("상담 내용이 저장되었습니다.")
-    except sqlite3.OperationalError as e:
-        st.error(f"상담 기록 저장 중 오류 발생: {e}")
+if __name__ == "__main__":
+    main()
